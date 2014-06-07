@@ -9,16 +9,17 @@ from lxml import etree
 import logging
 
 class BadRingException(Exception):
-"""
-Ошибка объединениня линии в кольцо
-"""
+    """
+    Ошибка объединениня линии в кольцо
+    """
+
     def __init__(self, message):
         self.message = message
 
 def readOsmFile(fileName):
-"""
-Чтение данных из файла формата OSM XML. Ленивый вариант. Жрет память.
-"""
+    """
+    Чтение данных из файла формата OSM XML. Ленивый вариант. Жрет память.
+    """
     logger.info("reading file " + fileName)
     fl = open(fileName)
     root = etree.parse(fl)
@@ -50,38 +51,41 @@ def readOsmFile(fileName):
     return result
 
 def mergeWays(ways_to_merge, ways):
-"""
-объединяет линии в кольцо, или же выдает исключение, если это невозможно
-кольцо должно быть без самопересечений
+    """
+    объединяет линии в кольцо, или же выдает исключение, если это невозможно
+    кольцо должно быть без самопересечений
+    если колец несколько, используется только первое
 
-ways_to_merge - id линий, которые объединяем
-ways - массивы точек, определяющих линии
-выход - список точек, входящих в кольцо
-"""
+    ways_to_merge - id линий, которые объединяем
+    ways - массивы точек, определяющих линии
+    выход - список точек, входящих в кольцо
+    """
     ends = dict()
+    firstnode = None
     for way_id in ways_to_merge:
         for node_id in [ ways[way_id][0], ways[way_id][-1] ] :
             if (firstnode == None):
                 firstnode = node_id
-            if ( ends[node_id] == None ):
+            if ( not node_id in ends ):
                 ends[node_id] = []
             ends[node_id].append(way_id)
     w = None
     ring = []
     n = firstnode
     node_count = 0
-    while ( ring[0] != n ):
+    while ( len(ring) == 0 or ring[0] != n ):
         if ( len(ends[n]) != 2 ):
             raise BadRingException("Can't merge ways into ring (selfintersections?)")
         if ( w != ends[n][0] ):
             w = ends[n][0]
         else :
             w = ends[n][1]
-        if ( w[0] != n ):
-            w.reverse()
-        ring += w[1:]
-        node_count++
-        n = w[-1]
+        way = ways[w][:]
+        if ( way[0] != n ):
+            way.reverse()
+        ring += way[1:]
+        node_count += 1
+        n = way[-1]
     if ( node_count != len(ends) ):
         logger.warning("using only first outer ring")
     return ring
