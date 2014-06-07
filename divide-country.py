@@ -16,38 +16,62 @@ class BadRingException(Exception):
     def __init__(self, message):
         self.message = message
 
-def readOsmFile(fileName):
+class OsmTarget:
     """
-    Чтение данных из файла формата OSM XML. Ленивый вариант. Жрет память.
+    XML handler
     """
-    logger.info("reading file " + fileName)
-    fl = open(fileName)
-    root = etree.parse(fl)
-    fl.close()
-    result={'nodes':dict(), 'ways':dict(), 'rels':dict()}
-    for rel in root.iter("relation"):
-        rel_id = rel.get("id")
-        result["rels"][rel_id] = [] 
-        for member in rel.iter("member"):
-            mem_type = member.get("type")
-            mem_role = member.get("role")
-            mem_id = member.get("ref")
-#            logger.debug("rel {0} mem {1} type {2} role {3}".format(rel_id,mem_id,mem_type,mem_role))
-            if ( mem_type == "way" and mem_role == "outer" ):
-#                logger.debug("relation " + rel_id + ", appending member " + mem_id)
-                result["rels"][rel_id].append(mem_id) 
-    logger.info("found {0} relations".format( len(result['rels']) ))
-    for way in root.iter("way"):
-        way_id = way.get("id")
-        result["ways"][way_id] = [] 
-        for nd in way.iter("nd"):
-            result["ways"][way_id].append( nd.get("ref") );
-    logger.info("found {0} ways".format( len(result['ways']) ))
-    for node in root.iter("node"):
-        node_id = node.get("id")
-        result["nodes"][node_id] = [ node.get("lat"), node.get("lon") ] 
-    logger.info("found {0} nodes".format( len(result['nodes']) ))
-    del root 
+    __countNodes=0;
+    __countWays=0;
+    __countRels=0;
+    __finished=False;
+    def __init__(self, result):
+        self.__result = result
+        self.__result["nodes"] = dict()
+        self.__result["ways"] = dict()
+        self.__result["rels"] = dict()
+    def start(self, tag, attrib):
+        if (tag=="node"): 
+            self.__countNodes += 1;
+            self.__result["nodes"][attrib["id"]] = [ attrib["lat"], attrib["lon"] ]
+        elif (tag=="nd"):
+            self.__result["ways"][self.__wayid].append(attrib["ref"])
+        elif (tag=="way"):
+            self.__countWays += 1;
+            self.__wayid = attrib["id"]
+            self.__result["ways"][self.__wayid] = [ ]
+        elif (tag=="member" ):
+            memtype=attrib["type"];
+            ref=attrib["ref"];
+            role=attrib["role"];
+            if (memtype=="way" and role == "outer"):
+                self.__result["rels"][self.__relid].append(ref)
+        elif (tag=="relation"):
+            self.__countRels += 1;
+            self.__relid=attrib["id"];
+            self.__result["rels"][self.__relid] = [ ]
+        elif (tag=="osm"): 
+            logger.info("parsing XML");
+#    def end(self, tag):
+#        return;
+#    def data(self, data):
+#        return
+#    def comment(self, text):
+#        return
+    def close(self):
+        logger.info("rels: {0}, ways: {1}, nodes: {2}".format(self.__countRels,self.__countWays,self.__countNodes))
+        logger.info("end of the XML")
+        return "closed!"
+
+def readOsmFile(filename):
+    """
+    Чтение данных из файла формата OSM XML
+    """
+    result=dict()
+    osmTarget=OsmTarget(result);
+    parser=etree.XMLParser(target=osmTarget);
+    f=open(filename,"r");
+    etree.parse(f,parser);
+    f.close();
     return result
 
 def mergeWays(ways_to_merge, ways):
@@ -95,5 +119,7 @@ logger = logging.getLogger(__name__)
 
 logger.info("start")
 osm = readOsmFile("bound.osm")
+print(osm["rels"])
 logger.info("finish")
+
 
