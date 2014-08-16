@@ -8,9 +8,12 @@
 from lxml import etree
 import logging
 
+osm = None
+areas = dict() 
+
 class BadRingException(Exception):
     """
-    Ошибка объединениня линии в кольцо
+    Ошибка объединения линии в кольцо
     """
 
     def __init__(self, message):
@@ -74,16 +77,16 @@ def readOsmFile(filename):
     f.close();
     return result
 
-def mergeWays(ways_to_merge, ways):
+def mergeWays(ways_to_merge):
     """
     объединяет линии в кольцо, или же выдает исключение, если это невозможно
     кольцо должно быть без самопересечений
     если колец несколько, используется только первое
 
     ways_to_merge - id линий, которые объединяем
-    ways - массивы точек, определяющих линии
     выход - список точек, входящих в кольцо
     """
+    ways=osm["ways"]
     ends = dict()
     firstnode = None
     for way_id in ways_to_merge:
@@ -93,11 +96,12 @@ def mergeWays(ways_to_merge, ways):
             if ( not node_id in ends ):
                 ends[node_id] = []
             ends[node_id].append(way_id)
+    logger.debug(ends)
     w = None
     ring = []
     n = firstnode
     node_count = 0
-    while ( len(ring) == 0 or ring[0] != n ):
+    while ( len(ring) == 0 or n != firstnode ):
         if ( len(ends[n]) != 2 ):
             raise BadRingException("Can't merge ways into ring (selfintersections?)")
         if ( w != ends[n][0] ):
@@ -114,12 +118,16 @@ def mergeWays(ways_to_merge, ways):
         logger.warning("using only first outer ring")
     return ring
 
+#======================================================================================
+
 logging.basicConfig(level=logging.DEBUG,format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 logger.info("start")
-osm = readOsmFile("bound.osm")
-print(osm["rels"])
+osm = readOsmFile("test/test1.osm")
+for k in osm["rels"]:
+    areas[k] = mergeWays(osm["rels"][k])
+logger.debug(areas)
 logger.info("finish")
 
 
