@@ -7,9 +7,10 @@
 
 from lxml import etree
 import logging
+from collections import deque, defaultdict, OrderedDict
 
 osm = None
-shapes = dict() 
+shapes = OrderedDict() 
 
 class BadRingException(Exception):
     """
@@ -130,27 +131,21 @@ def createGraph(shapesids):
     ребро - к соседней области
     области считаются соседними, если имеют 2 или более общих точки
     """
-    pointinshape = dict()
+    pointinshape = defaultdict(list)
     for s in shapesids:
         for p in shapes[s]:
-            if not p in pointinshape:
-                pointinshape[p] = []
             pointinshape[p].append(s)
-    sharepoints = dict()
+    sharepoints = defaultdict(dict)
     for p in pointinshape:
         for i in range(0,len(pointinshape[p])-1):
             for j in range(i+1,len(pointinshape[p])):
                 s1 = min(pointinshape[p][i], pointinshape[p][j])
                 s2 = max(pointinshape[p][i], pointinshape[p][j])
-                if not s1 in sharepoints:
-                    sharepoints[s1] = dict()
-                if not s2 in sharepoints[s1]:
-                    sharepoints[s1][s2] = 0
-                sharepoints[s1][s2] += 1;
+                sharepoints[s1][s2] = sharepoints[s1].setdefault(s2,0) + 1;
     logger.debug(sharepoints)
-    G = dict()
-    for s1 in sharepoints:
-        for s2 in sharepoints[s1]:
+    G = OrderedDict()
+    for s1 in sorted(sharepoints.keys()):
+        for s2 in sorted(sharepoints[s1].keys()):
             if ( sharepoints[s1][s2] > 1 ):
                 if not s1 in G:
                     G[s1] = []
@@ -159,6 +154,26 @@ def createGraph(shapesids):
                 G[s1].append(s2)
                 G[s2].append(s1)
     return G
+
+def getFarthestPoint(G,pointid):
+    """
+    поиск точки наиболее удаленной от точки point
+    в графе G
+    """
+    startpoint = pointid
+    bfs = dict()
+    bfs[startpoint] = 1
+    Q = deque()
+    Q.append(startpoint)
+    lastpoint = startpoint
+    while ( len(Q) > 0 ):
+        p = Q.popleft()
+        for n in G[p]:
+            if not n in bfs:
+                bfs[n] = 1
+                Q.append(n)
+        lastpoint = p
+    return lastpoint
 
 #======================================================================================
 
@@ -174,6 +189,9 @@ logger.debug(S)
 
 G = createGraph(shapes.keys())
 logger.debug(G)
+s1 = getFarthestPoint(G,list(shapes.keys())[0])
+s2 = getFarthestPoint(G,s1)
+logger.debug("s1 {} s2 {}".format(s1,s2))
 
 logger.info("finish")
 
