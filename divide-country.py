@@ -175,6 +175,50 @@ def getFarthestPoint(G,pointid):
         lastpoint = p
     return lastpoint
 
+def bfsMarkParts(G,shapes_areas,bfs,startpoints,part_id):
+    """
+    маркирует части графа
+    """
+    p = startpoints[part_id]
+    Q = deque()
+    Q.append(p)
+    area = shapes_areas[p]
+    total_area = sum(shapes_areas.values())
+    next_part_marked = False
+    while( len(Q) > 0 ):
+        p = Q.popleft()
+        for n in G[p]:
+            if ( n in bfs ): 
+                continue
+            if ( ( part_id < len(startpoints) - 1 ) and 
+                    ( not next_part_marked ) and
+                    ( area >= total_area/2 ) ):
+                bfsMarkParts(G,shapes_areas,bfs,startpoints,part_id+1)
+                next_part_marked = True
+            if ( n in bfs ): 
+                continue
+            bfs[n] = part_id
+            area += shapes_areas[n]
+            Q.append(n)
+    return
+
+def divideGraph(G,p1,p2):
+    """
+    делит граф G на две примерно равные по площади связные части
+    построение частей начинается с точек p1 и p2
+    возвращает массив списков из идентификаторов полученных частей
+    """
+    S = dict()
+    for s in shapes:
+        S[s] = calcShapeArea(shapes[s])
+    logger.debug(S)
+    bfs = {p1:0, p2:1}
+    bfsMarkParts(G,S,bfs,[p1,p2],0)
+    result = [[],[]]
+    for s in bfs:
+        result[bfs[s]].append(s)
+    return [ sorted(result[0]), sorted(result[1]) ]
+
 #======================================================================================
 
 logging.basicConfig(level=logging.DEBUG,format="%(asctime)s %(levelname)s %(message)s")
@@ -184,14 +228,15 @@ logger.info("start")
 osm = readOsmFile("test/test1.osm")
 for k in osm["rels"]:
     shapes[k] = mergeWays(osm["rels"][k])
-S = [ calcShapeArea(shapes[id]) for id in shapes ]
-logger.debug(S)
 
 G = createGraph(shapes.keys())
 logger.debug(G)
 s1 = getFarthestPoint(G,list(shapes.keys())[0])
 s2 = getFarthestPoint(G,s1)
 logger.debug("s1 {} s2 {}".format(s1,s2))
+
+parts = divideGraph(G,s1,s2)
+logger.debug("parts {}".format(parts))
 
 logger.info("finish")
 
