@@ -9,7 +9,7 @@ from lxml import etree
 import logging
 
 osm = None
-areas = dict() 
+shapes = dict() 
 
 class BadRingException(Exception):
     """
@@ -96,7 +96,6 @@ def mergeWays(ways_to_merge):
             if ( not node_id in ends ):
                 ends[node_id] = []
             ends[node_id].append(way_id)
-    logger.debug(ends)
     w = None
     ring = []
     n = firstnode
@@ -118,6 +117,49 @@ def mergeWays(ways_to_merge):
         logger.warning("using only first outer ring")
     return ring
 
+def calcShapeArea(shape):
+    """
+    расчет площади выпуклого многоугольника
+    """
+    return 1
+
+def createGraph(shapesids):
+    """
+    создание графа соседних областей
+    узел - область
+    ребро - к соседней области
+    области считаются соседними, если имеют 2 или более общих точки
+    """
+    pointinshape = dict()
+    for s in shapesids:
+        for p in shapes[s]:
+            if not p in pointinshape:
+                pointinshape[p] = []
+            pointinshape[p].append(s)
+    sharepoints = dict()
+    for p in pointinshape:
+        for i in range(0,len(pointinshape[p])-1):
+            for j in range(i+1,len(pointinshape[p])):
+                s1 = min(pointinshape[p][i], pointinshape[p][j])
+                s2 = max(pointinshape[p][i], pointinshape[p][j])
+                if not s1 in sharepoints:
+                    sharepoints[s1] = dict()
+                if not s2 in sharepoints[s1]:
+                    sharepoints[s1][s2] = 0
+                sharepoints[s1][s2] += 1;
+    logger.debug(sharepoints)
+    G = dict()
+    for s1 in sharepoints:
+        for s2 in sharepoints[s1]:
+            if ( sharepoints[s1][s2] > 1 ):
+                if not s1 in G:
+                    G[s1] = []
+                if not s2 in G:
+                    G[s2] = []
+                G[s1].append(s2)
+                G[s2].append(s1)
+    return G
+
 #======================================================================================
 
 logging.basicConfig(level=logging.DEBUG,format="%(asctime)s %(levelname)s %(message)s")
@@ -126,8 +168,12 @@ logger = logging.getLogger(__name__)
 logger.info("start")
 osm = readOsmFile("test/test1.osm")
 for k in osm["rels"]:
-    areas[k] = mergeWays(osm["rels"][k])
-logger.debug(areas)
-logger.info("finish")
+    shapes[k] = mergeWays(osm["rels"][k])
+S = [ calcShapeArea(shapes[id]) for id in shapes ]
+logger.debug(S)
 
+G = createGraph(shapes.keys())
+logger.debug(G)
+
+logger.info("finish")
 
