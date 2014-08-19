@@ -1,7 +1,12 @@
 #! /usr/bin/python3
 
-# Утилита для разделения страны на части, близкие по площади. Части 
-# состоят из целого числа регионов
+# Утилита для разделения набора областей на две связные части, близкие по площади. 
+# Области, для который не получается определить соседей, попадают в 3ю часть:
+# "islands"
+#
+# На входе: OSM файл, содержащий отношения областей и входящие в них
+# точки и линии
+# На выходе: три списка идентификаторов отношений
 
 # $Id$
 
@@ -84,10 +89,10 @@ def mergeWays(ways_to_merge):
     """
     объединяет линии в кольцо, или же выдает исключение, если это невозможно
     кольцо должно быть без самопересечений
-    если колец несколько, используется только первое
+    если колец несколько, используется только наибольшее по площади
 
     ways_to_merge - id линий, которые объединяем
-    выход - список точек, входящих в кольцо
+    выход - ( <список точек, входящих в кольцо>, <площадь в кв. метрах> )
     """
     ways=osm["ways"]
     ends = defaultdict(list)
@@ -98,25 +103,46 @@ def mergeWays(ways_to_merge):
                 firstnode = node_id
             ends[node_id].append(way_id)
     w = None
+    rings = []
     ring = []
     n = firstnode
     node_count = 0
-    while ( len(ring) == 0 or n != firstnode ):
-        if ( len(ends[n]) != 2 ):
+    while ( len(ends) > 0 ):
+        if ( len(ends[n]) > 2 or (len(ends[n]) == 1 and w != ends[n][0]) ):
             raise BadRingException("Can't merge ways into ring (selfintersections?)")
-        if ( w != ends[n][0] ):
-            w = ends[n][0]
-        else :
+        if ( len(ends[n]) == 1 ):
+            #ring is closed, start new one (if possible)
+            w = None
+            del ends[n]
+            rings.append(ring)
+            ring = []
+            if ( len(ends) > 0 ):
+                n = list(ends.keys())[0]
+                logger.warning("using only biggest outer ring")
+            continue
+        if ( w == ends[n][0] ):
             w = ends[n][1]
+            del ends[n]
+        elif ( w == ends[n][1] ):
+            w = ends[n][0]
+            del ends[n]
+        elif ( w == None ):
+            w = ends[n].pop()
+        else:
+            raise BadRingException("Can't merge ways into ring (something went wrong)")
         way = ways[w][:]
         if ( way[0] != n ):
             way.reverse()
         ring += way[1:]
-        node_count += 1
         n = way[-1]
-    if ( node_count != len(ends) ):
-        logger.warning("using only first outer ring")
-    return ring
+    maxarea = 0
+    biggestring = None
+    for ring in rings:
+        area = calcShapeArea(ring)
+        if area > maxarea:
+            maxarea = area
+            biggestring = ring
+    return (biggestring, area)
 
 def geopoint(lat,lon): 
     """
@@ -230,24 +256,30 @@ logger = logging.getLogger(__name__)
 logger.info("start")
 logger.info("read OSM file")
 osm = readOsmFile("test/test2.osm")
-logger.info("merge ways into rings")
+logger.info("merge ways into rings and calc area")
 for k in osm["rels"]:
-    shapes[k] = mergeWays(osm["rels"][k])
-logger.info("calculate areas")
-for s in shapes:
-    shapes_areas[s] = calcShapeArea(shapes[s])
-    logger.debug("area {:10} {:10.2f} km2".format(s,shapes_areas[s]/1000000))
+    ( shapes[k], shapes_areas[k] )  = mergeWays(osm["rels"][k])
+    logger.debug("area {:10} {:10.2f} km2".format(k,shapes_areas[k]/1000000))
 logger.info("create graph")
 G = createGraph(shapes.keys())
+logger.debug("graph size: {}".format(len(G)))
 s1 = getFarthestPoint(G,list(G.keys())[0])
 s2 = getFarthestPoint(G,s1)
 
 logger.info("divide graph")
 parts = divideGraph(G,s1,s2)
+parts.append([])
+for s in shapes:
+    if (not s in G):
+        parts[2].append(s)    
 
+logger.debug("part 0: {}".format(len(parts[0])))
+logger.debug("part 1: {}".format(len(parts[1])))
+logger.debug("part islands: {}".format(len(parts[2])))
 logger.info("print result")
-for p in range(0,2):
-    print("{}: ".format(p),end="")
+partnames = ["part1", "part2", "islands"]
+for p in range(0,3):
+    print("{}: ".format(partnames[p]),end="")
     for s in range(0,len(parts[p])):
         print(parts[p][s],end="")
         if ( s < len(parts[p]) - 1):
