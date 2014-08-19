@@ -17,6 +17,7 @@ from geographiclib.geodesic import Geodesic
 
 osm = None
 shapes = OrderedDict() 
+shapes_inner = OrderedDict() 
 shapes_areas = dict()
 
 class BadRingException(Exception):
@@ -35,11 +36,12 @@ class OsmTarget:
     __countWays=0;
     __countRels=0;
     __finished=False;
+    __good_relation=False;
     def __init__(self, result):
         self.__result = result
         self.__result["nodes"] = dict()
         self.__result["ways"] = dict()
-        self.__result["rels"] = dict()
+        self.__result["rels"] = { "outer": dict(), "inner": dict() }
     def start(self, tag, attrib):
         if (tag=="node"): 
             self.__countNodes += 1;
@@ -50,16 +52,23 @@ class OsmTarget:
             self.__countWays += 1;
             self.__wayid = attrib["id"]
             self.__result["ways"][self.__wayid] = [ ]
-        elif (tag=="member" ):
+        elif (tag=="member" and self.__good_relation ):
             memtype=attrib["type"];
             ref=attrib["ref"];
             role=attrib["role"];
             if (memtype=="way" and role == "outer"):
-                self.__result["rels"][self.__relid].append(ref)
+                self.__result["rels"]["outer"][self.__relid].append(ref)
+            if (memtype=="way" and role == "inner"):
+                self.__result["rels"]["inner"][self.__relid].append(ref)
         elif (tag=="relation"):
+            if ( attrib.get("action") == "delete" ):
+                self.__good_relation = False
+                return
+            self.__good_relation = True
             self.__countRels += 1;
             self.__relid=attrib["id"];
-            self.__result["rels"][self.__relid] = [ ]
+            self.__result["rels"]["outer"][self.__relid] = [ ]
+            self.__result["rels"]["inner"][self.__relid] = [ ]
         elif (tag=="osm"): 
             logger.info("parsing XML");
 #    def end(self, tag):
@@ -85,14 +94,15 @@ def readOsmFile(filename):
     f.close();
     return result
 
-def mergeWays(ways_to_merge):
+def mergeWays(ways_to_merge,return_list=False):
     """
     объединяет линии в кольцо, или же выдает исключение, если это невозможно
     кольцо должно быть без самопересечений
-    если колец несколько, используется только наибольшее по площади
 
     ways_to_merge - id линий, которые объединяем
+    return_list - вернуть список всех колец (иначе самое большое)
     выход - ( <список точек, входящих в кольцо>, <площадь в кв. метрах> )
+            либо список колец (см return_list)
     """
     ways=osm["ways"]
     ends = defaultdict(list)
@@ -118,7 +128,8 @@ def mergeWays(ways_to_merge):
             ring = []
             if ( len(ends) > 0 ):
                 n = list(ends.keys())[0]
-                logger.warning("using only biggest outer ring")
+                if (not return_list):
+                    logger.warning("using only biggest ring")
             continue
         if ( w == ends[n][0] ):
             w = ends[n][1]
@@ -135,6 +146,8 @@ def mergeWays(ways_to_merge):
             way.reverse()
         ring += way[1:]
         n = way[-1]
+    if return_list:
+        return rings
     maxarea = 0
     biggestring = None
     for ring in rings:
@@ -166,9 +179,14 @@ def createGraph(shapesids):
     области считаются соседними, если имеют 2 или более общих точки
     """
     pointinshape = defaultdict(list)
+    pointinshape_inner = defaultdict(list)
     for s in shapesids:
         for p in shapes[s]:
             pointinshape[p].append(s)
+            pointinshape_inner[p].append(s)
+        for plist in shapes_inner[s]:
+            for p in plist:
+                pointinshape_inner[p].append(s)
     sharepoints = defaultdict(dict)
     for p in pointinshape:
         for i in range(0,len(pointinshape[p])-1):
@@ -176,6 +194,13 @@ def createGraph(shapesids):
                 s1 = min(pointinshape[p][i], pointinshape[p][j])
                 s2 = max(pointinshape[p][i], pointinshape[p][j])
                 sharepoints[s1][s2] = sharepoints[s1].setdefault(s2,0) + 1;
+    sharepoints_inner = defaultdict(dict)
+    for p in pointinshape_inner:
+        for i in range(0,len(pointinshape_inner[p])-1):
+            for j in range(i+1,len(pointinshape_inner[p])):
+                s1 = min(pointinshape_inner[p][i], pointinshape_inner[p][j])
+                s2 = max(pointinshape_inner[p][i], pointinshape_inner[p][j])
+                sharepoints_inner[s1][s2] = sharepoints_inner[s1].setdefault(s2,0) + 1;
     G = OrderedDict()
     for s1 in sorted(sharepoints.keys()):
         for s2 in sorted(sharepoints[s1].keys()):
@@ -186,6 +211,19 @@ def createGraph(shapesids):
                     G[s2] = []
                 G[s1].append(s2)
                 G[s2].append(s1)
+    islands = set(shapesids) - set(G.keys())
+    for s1 in sorted(sharepoints_inner.keys()):
+        for s2 in sorted(sharepoints_inner[s1].keys()):
+            if ( s1 in islands or s2 in islands):
+                if ( sharepoints_inner[s1][s2] > 1 ):
+                    if not s1 in G:
+                        G[s1] = []
+                    if not s2 in G:
+                        G[s2] = []
+                    G[s1].append(s2)
+                    G[s2].append(s1)
+
+
     return G
 
 def getFarthestPoint(G,pointid):
@@ -257,8 +295,9 @@ logger.info("start")
 logger.info("read OSM file")
 osm = readOsmFile("test/test2.osm")
 logger.info("merge ways into rings and calc area")
-for k in osm["rels"]:
-    ( shapes[k], shapes_areas[k] )  = mergeWays(osm["rels"][k])
+for k in osm["rels"]["outer"]:
+    ( shapes[k], shapes_areas[k] )  = mergeWays(osm["rels"]["outer"][k])
+    shapes_inner[k] = mergeWays(osm["rels"]["inner"][k],True)
     logger.debug("area {:10} {:10.2f} km2".format(k,shapes_areas[k]/1000000))
 logger.info("create graph")
 G = createGraph(shapes.keys())
