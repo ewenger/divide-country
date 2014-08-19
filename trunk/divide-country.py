@@ -8,9 +8,11 @@
 from lxml import etree
 import logging
 from collections import deque, defaultdict, OrderedDict
+from geographiclib.geodesic import Geodesic
 
 osm = None
 shapes = OrderedDict() 
+shapes_areas = dict()
 
 class BadRingException(Exception):
     """
@@ -88,14 +90,12 @@ def mergeWays(ways_to_merge):
     выход - список точек, входящих в кольцо
     """
     ways=osm["ways"]
-    ends = dict()
+    ends = defaultdict(list)
     firstnode = None
     for way_id in ways_to_merge:
         for node_id in [ ways[way_id][0], ways[way_id][-1] ] :
             if (firstnode == None):
                 firstnode = node_id
-            if ( not node_id in ends ):
-                ends[node_id] = []
             ends[node_id].append(way_id)
     w = None
     ring = []
@@ -118,11 +118,19 @@ def mergeWays(ways_to_merge):
         logger.warning("using only first outer ring")
     return ring
 
+def geopoint(lat,lon): 
+    """
+    возвращает пару координат в виде dictionary {lat,lon}
+    """
+    return {'lat': lat, 'lon': lon}
+
 def calcShapeArea(shape):
     """
-    расчет площади выпуклого многоугольника
+    расчет площади выпуклого геомногоугольника
     """
-    return 1
+    poly = [ geopoint( float(osm["nodes"][i][0]), float(osm["nodes"][i][1]) )  for i in shape ]
+    area = abs(Geodesic.WGS84.Area(poly)["area"])
+    return area
 
 def createGraph(shapesids):
     """
@@ -142,7 +150,6 @@ def createGraph(shapesids):
                 s1 = min(pointinshape[p][i], pointinshape[p][j])
                 s2 = max(pointinshape[p][i], pointinshape[p][j])
                 sharepoints[s1][s2] = sharepoints[s1].setdefault(s2,0) + 1;
-    logger.debug(sharepoints)
     G = OrderedDict()
     for s1 in sorted(sharepoints.keys()):
         for s2 in sorted(sharepoints[s1].keys()):
@@ -175,7 +182,7 @@ def getFarthestPoint(G,pointid):
         lastpoint = p
     return lastpoint
 
-def bfsMarkParts(G,shapes_areas,bfs,startpoints,part_id):
+def bfsMarkParts(G,bfs,startpoints,part_id):
     """
     маркирует части графа
     """
@@ -193,7 +200,7 @@ def bfsMarkParts(G,shapes_areas,bfs,startpoints,part_id):
             if ( ( part_id < len(startpoints) - 1 ) and 
                     ( not next_part_marked ) and
                     ( area >= total_area/2 ) ):
-                bfsMarkParts(G,shapes_areas,bfs,startpoints,part_id+1)
+                bfsMarkParts(G,bfs,startpoints,part_id+1)
                 next_part_marked = True
             if ( n in bfs ): 
                 continue
@@ -208,12 +215,8 @@ def divideGraph(G,p1,p2):
     построение частей начинается с точек p1 и p2
     возвращает массив списков из идентификаторов полученных частей
     """
-    S = dict()
-    for s in shapes:
-        S[s] = calcShapeArea(shapes[s])
-    logger.debug(S)
     bfs = {p1:0, p2:1}
-    bfsMarkParts(G,S,bfs,[p1,p2],0)
+    bfsMarkParts(G,bfs,[p1,p2],0)
     result = [[],[]]
     for s in bfs:
         result[bfs[s]].append(s)
@@ -225,18 +228,32 @@ logging.basicConfig(level=logging.DEBUG,format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 logger.info("start")
-osm = readOsmFile("test/test1.osm")
+logger.info("read OSM file")
+osm = readOsmFile("test/test2.osm")
+logger.info("merge ways into rings")
 for k in osm["rels"]:
     shapes[k] = mergeWays(osm["rels"][k])
-
+logger.info("calculate areas")
+for s in shapes:
+    shapes_areas[s] = calcShapeArea(shapes[s])
+    logger.debug("area {:10} {:10.2f} km2".format(s,shapes_areas[s]/1000000))
+logger.info("create graph")
 G = createGraph(shapes.keys())
-logger.debug(G)
-s1 = getFarthestPoint(G,list(shapes.keys())[0])
+s1 = getFarthestPoint(G,list(G.keys())[0])
 s2 = getFarthestPoint(G,s1)
-logger.debug("s1 {} s2 {}".format(s1,s2))
 
+logger.info("divide graph")
 parts = divideGraph(G,s1,s2)
-logger.debug("parts {}".format(parts))
+
+logger.info("print result")
+for p in range(0,2):
+    print("{}: ".format(p),end="")
+    for s in range(0,len(parts[p])):
+        print(parts[p][s],end="")
+        if ( s < len(parts[p]) - 1):
+            print(", ",end="")
+        else:
+            print("")
 
 logger.info("finish")
 
