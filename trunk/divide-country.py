@@ -17,8 +17,8 @@ from geographiclib.geodesic import Geodesic
 
 osm = None
 shapes = OrderedDict() 
-shapes_inner = OrderedDict() 
 shapes_areas = dict()
+nested_shapes = dict()
 
 class BadRingException(Exception):
     """
@@ -94,15 +94,14 @@ def readOsmFile(filename):
     f.close();
     return result
 
-def mergeWays(ways_to_merge,return_list=False):
+def mergeWays(ways_to_merge):
     """
     объединяет линии в кольцо, или же выдает исключение, если это невозможно
     кольцо должно быть без самопересечений
+    если колец несколько, берется наибольшее по площади
 
     ways_to_merge - id линий, которые объединяем
-    return_list - вернуть список всех колец (иначе самое большое)
     выход - ( <список точек, входящих в кольцо>, <площадь в кв. метрах> )
-            либо список колец (см return_list)
     """
     ways=osm["ways"]
     ends = defaultdict(list)
@@ -128,8 +127,7 @@ def mergeWays(ways_to_merge,return_list=False):
             ring = []
             if ( len(ends) > 0 ):
                 n = list(ends.keys())[0]
-                if (not return_list):
-                    logger.warning("using only biggest ring")
+                logger.warning("using only biggest ring")
             continue
         if ( w == ends[n][0] ):
             w = ends[n][1]
@@ -146,8 +144,6 @@ def mergeWays(ways_to_merge,return_list=False):
             way.reverse()
         ring += way[1:]
         n = way[-1]
-    if return_list:
-        return rings
     maxarea = 0
     biggestring = None
     for ring in rings:
@@ -179,14 +175,9 @@ def createGraph(shapesids):
     области считаются соседними, если имеют 2 или более общих точки
     """
     pointinshape = defaultdict(list)
-    pointinshape_inner = defaultdict(list)
     for s in shapesids:
         for p in shapes[s]:
             pointinshape[p].append(s)
-            pointinshape_inner[p].append(s)
-        for plist in shapes_inner[s]:
-            for p in plist:
-                pointinshape_inner[p].append(s)
     sharepoints = defaultdict(dict)
     for p in pointinshape:
         for i in range(0,len(pointinshape[p])-1):
@@ -194,13 +185,6 @@ def createGraph(shapesids):
                 s1 = min(pointinshape[p][i], pointinshape[p][j])
                 s2 = max(pointinshape[p][i], pointinshape[p][j])
                 sharepoints[s1][s2] = sharepoints[s1].setdefault(s2,0) + 1;
-    sharepoints_inner = defaultdict(dict)
-    for p in pointinshape_inner:
-        for i in range(0,len(pointinshape_inner[p])-1):
-            for j in range(i+1,len(pointinshape_inner[p])):
-                s1 = min(pointinshape_inner[p][i], pointinshape_inner[p][j])
-                s2 = max(pointinshape_inner[p][i], pointinshape_inner[p][j])
-                sharepoints_inner[s1][s2] = sharepoints_inner[s1].setdefault(s2,0) + 1;
     G = OrderedDict()
     for s1 in sorted(sharepoints.keys()):
         for s2 in sorted(sharepoints[s1].keys()):
@@ -211,19 +195,6 @@ def createGraph(shapesids):
                     G[s2] = []
                 G[s1].append(s2)
                 G[s2].append(s1)
-    islands = set(shapesids) - set(G.keys())
-    for s1 in sorted(sharepoints_inner.keys()):
-        for s2 in sorted(sharepoints_inner[s1].keys()):
-            if ( s1 in islands or s2 in islands):
-                if ( sharepoints_inner[s1][s2] > 1 ):
-                    if not s1 in G:
-                        G[s1] = []
-                    if not s2 in G:
-                        G[s2] = []
-                    G[s1].append(s2)
-                    G[s2].append(s1)
-
-
     return G
 
 def getFarthestPoint(G,pointid):
@@ -286,6 +257,34 @@ def divideGraph(G,p1,p2):
         result[bfs[s]].append(s)
     return [ sorted(result[0]), sorted(result[1]) ]
 
+def getNestedShapes():
+    """
+    поиск вложенных областей
+    result[s] - список областей, внутри которых есть кусочек области s
+    """
+    pointinshape = {
+        "outer": defaultdict(set),
+        "inner": defaultdict(set)
+    }
+    
+    for t in ["outer","inner"]:
+        for r in osm["rels"][t]:
+            for w in osm["rels"][t][r]:
+                for n in osm["ways"][w]:
+                    pointinshape[t][n].add(r)
+    point_set = set(pointinshape["outer"].keys()) & set (pointinshape["inner"].keys())
+    sharepoints = defaultdict(dict)
+    for p in point_set:
+        for i in pointinshape["inner"][p]:
+            for o in pointinshape["outer"][p]:
+                sharepoints[i][o] = sharepoints[i].setdefault(o,0) + 1;
+    result = defaultdict(list)
+    for si in sharepoints:
+        for so in sharepoints[si]:
+            if sharepoints[si][so] >= 2:
+                result[so].append(si)  # outer way belongs to the inner shape
+    return result
+
 #======================================================================================
 
 logging.basicConfig(level=logging.DEBUG,format="%(asctime)s %(levelname)s %(message)s")
@@ -293,11 +292,10 @@ logger = logging.getLogger(__name__)
 
 logger.info("start")
 logger.info("read OSM file")
-osm = readOsmFile("test/test2.osm")
+osm = readOsmFile("test/test3.osm")
 logger.info("merge ways into rings and calc area")
 for k in osm["rels"]["outer"]:
     ( shapes[k], shapes_areas[k] )  = mergeWays(osm["rels"]["outer"][k])
-    shapes_inner[k] = mergeWays(osm["rels"]["inner"][k],True)
     logger.debug("area {:10} {:10.2f} km2".format(k,shapes_areas[k]/1000000))
 logger.info("create graph")
 G = createGraph(shapes.keys())
@@ -307,10 +305,19 @@ s2 = getFarthestPoint(G,s1)
 
 logger.info("divide graph")
 parts = divideGraph(G,s1,s2)
+
+logger.info("get nested shapes")
+nested_shapes = getNestedShapes()
+islands = set(shapes.keys()) - set(G.keys())
+for si in ( islands & set(nested_shapes.keys()) ):
+    so = nested_shapes[si][0]
+    for part in parts:
+        if so in part:
+            part.append(si)
+    islands.remove(si)
 parts.append([])
-for s in shapes:
-    if (not s in G):
-        parts[2].append(s)    
+for s in islands:
+    parts[-1].append(s)
 
 logger.debug("part 0: {}".format(len(parts[0])))
 logger.debug("part 1: {}".format(len(parts[1])))
@@ -318,7 +325,8 @@ logger.debug("part islands: {}".format(len(parts[2])))
 logger.info("print result")
 partnames = ["part1", "part2", "islands"]
 for p in range(0,3):
-    print("{}: ".format(partnames[p]),end="")
+    if ( len(parts[p]) > 0 ):
+        print("{}: ".format(partnames[p]),end="")
     for s in range(0,len(parts[p])):
         print(parts[p][s],end="")
         if ( s < len(parts[p]) - 1):
