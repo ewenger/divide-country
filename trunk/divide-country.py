@@ -151,7 +151,8 @@ def mergeWays(ways_to_merge):
         if area > maxarea:
             maxarea = area
             biggestring = ring
-    return (biggestring, area)
+        logger.debug("area: {:15.2f} points: {:5}".format(area,len(ring)))
+    return (biggestring, maxarea)
 
 def geopoint(lat,lon): 
     """
@@ -226,6 +227,7 @@ def bfsMarkParts(G,bfs,startpoints,part_id):
     Q.append(p)
     area = shapes_areas[p]
     total_area = sum(shapes_areas.values())
+    logger.debug("total area: {}".format(total_area))
     next_part_marked = False
     while( len(Q) > 0 ):
         p = Q.popleft()
@@ -295,6 +297,7 @@ logger.info("read OSM file")
 osm = readOsmFile("test/test3.osm")
 logger.info("merge ways into rings and calc area")
 for k in osm["rels"]["outer"]:
+    logger.debug(k)
     ( shapes[k], shapes_areas[k] )  = mergeWays(osm["rels"]["outer"][k])
     logger.debug("area {:10} {:10.2f} km2".format(k,shapes_areas[k]/1000000))
 logger.info("create graph")
