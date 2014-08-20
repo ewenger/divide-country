@@ -12,6 +12,7 @@
 
 from lxml import etree
 import logging
+import argparse
 from collections import deque, defaultdict, OrderedDict
 from geographiclib.geodesic import Geodesic
 
@@ -289,12 +290,24 @@ def getNestedShapes():
 
 #======================================================================================
 
-logging.basicConfig(level=logging.DEBUG,format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 logger.info("start")
+logger.info("parse arguments")
+parser = argparse.ArgumentParser(description="Divide group of OSM multipolygons into two complete parts")
+parser.add_argument("--file","-f",required=True,
+        help="input OSM file (required)")
+parser.add_argument("--num","-n",type=int, default=1,
+        help="how many times to apply (you will get 2^n parts, default: 1)")
+parser.add_argument("--debug","-d", action="store_true", default=False, 
+        help="show debug messages (default: off)")
+args = parser.parse_args();
+if (args.debug):
+    logger.setLevel(logging.DEBUG)
+
 logger.info("read OSM file")
-osm = readOsmFile("test/test3.osm")
+osm = readOsmFile(args.file)
 logger.info("merge ways into rings and calc area")
 for k in osm["rels"]["outer"]:
     logger.debug(k)
