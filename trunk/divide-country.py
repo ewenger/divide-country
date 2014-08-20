@@ -227,7 +227,9 @@ def bfsMarkParts(G,bfs,startpoints,part_id):
     Q = deque()
     Q.append(p)
     area = shapes_areas[p]
-    total_area = sum(shapes_areas.values())
+    total_area = 0.0
+    for s in G:
+        total_area += shapes_areas[s]
     logger.debug("total area: {}".format(total_area))
     next_part_marked = False
     while( len(Q) > 0 ):
@@ -244,6 +246,7 @@ def bfsMarkParts(G,bfs,startpoints,part_id):
                 continue
             bfs[n] = part_id
             area += shapes_areas[n]
+            logger.debug("p {} n {} area {}".format(part_id,n,area))
             Q.append(n)
     return
 
@@ -299,7 +302,7 @@ parser = argparse.ArgumentParser(description="Divide group of OSM multipolygons 
 parser.add_argument("--file","-f",required=True,
         help="input OSM file (required)")
 parser.add_argument("--num","-n",type=int, default=1,
-        help="how many times to apply (you will get 2^n parts, default: 1)")
+        help="repeat n times (you will get 2^n parts, default: 1)")
 parser.add_argument("--debug","-d", action="store_true", default=False, 
         help="show debug messages (default: off)")
 args = parser.parse_args();
@@ -313,18 +316,27 @@ for k in osm["rels"]["outer"]:
     logger.debug(k)
     ( shapes[k], shapes_areas[k] )  = mergeWays(osm["rels"]["outer"][k])
     logger.debug("area {:10} {:10.2f} km2".format(k,shapes_areas[k]/1000000))
-logger.info("create graph")
-G = createGraph(shapes.keys())
-logger.debug("graph size: {}".format(len(G)))
-s1 = getFarthestPoint(G,list(G.keys())[0])
-s2 = getFarthestPoint(G,s1)
 
-logger.info("divide graph")
-parts = divideGraph(G,s1,s2)
+parts = [ list(shapes.keys()) ]
+for loopnum in range(0,args.num):
+    logger.debug("partition {}".format(loopnum))
+    newparts = []
+    for part in parts:
+        logger.info("create graph")
+        logger.debug("number of shapes: {}".format(len(part)))
+        G = createGraph(part)
+        logger.debug("graph size: {}".format(len(G)))
+        s1 = getFarthestPoint(G,list(G.keys())[0])
+        s2 = getFarthestPoint(G,s1)
+        logger.info("divide graph")
+        newparts += divideGraph(G,s1,s2)
+    parts = newparts
 
 logger.info("get nested shapes")
 nested_shapes = getNestedShapes()
-islands = set(shapes.keys()) - set(G.keys())
+islands = set(shapes.keys())
+for part in parts:
+    islands -= set(part)
 for si in ( islands & set(nested_shapes.keys()) ):
     so = nested_shapes[si][0]
     for part in parts:
@@ -335,20 +347,14 @@ parts.append([])
 for s in islands:
     parts[-1].append(s)
 
-logger.debug("part 0: {}".format(len(parts[0])))
-logger.debug("part 1: {}".format(len(parts[1])))
-logger.debug("part islands: {}".format(len(parts[2])))
 logger.info("print result")
-partnames = ["part1", "part2", "islands"]
-for p in range(0,3):
+for p in range(0,len(parts)):
     if ( len(parts[p]) > 0 ):
-        print("{}: ".format(partnames[p]),end="")
-    for s in range(0,len(parts[p])):
-        print(parts[p][s],end="")
-        if ( s < len(parts[p]) - 1):
-            print(", ",end="")
-        else:
-            print("")
+        logger.debug("part {}: {}".format(p,len(parts[p])))
+        print("{}: {}".format(p,", ".join(parts[p])))
+if ( len(islands) > 0 ):
+    logger.debug("islands: {}".format(p,len(islands)))
+    print("islands: {}".format(", ".join(islands)))
 
 logger.info("finish")
 
