@@ -223,43 +223,30 @@ def bfsMarkParts(G,bfs,startpoints):
     """
     маркирует части графа
     """
-    Q = deque()
-    qlen = [1,1]
+    Q = [ deque(), deque() ]
     area = [0,0]
-    total_area = 0.0
-    for s in G:
-        total_area += shapes_areas[s]
     for p in range(0,2):
-        Q.append(startpoints[p])
+        Q[p].append(startpoints[p])
         area[p] = shapes_areas[startpoints[p]]
-    while( len(Q) > 0 ):
-        p = Q.popleft()
-        part_id = bfs[p]
+    while( len(Q[0]) > 0 or len(Q[1]) > 0 ):
+        part_id =  1 
+        if ( ( area[0] < area[1] and len(Q[0]) > 0 ) 
+                or len(Q[1]) == 0  ):
+            part_id = 0
         apart_id = abs(part_id - 1)
+        p = Q[part_id].popleft()
+        part_id = bfs[p]
         logger.debug("part {} p {} areapart {}".format(part_id,p,area[part_id]))
-        qlen[part_id] -= 1
-        #if (area[part_id] > total_area/2 and qlen[apart_id] > 0):
-        if (area[part_id] > area[apart_id] and qlen[apart_id] > 0):
-            Q.append(p)
-            qlen[part_id] += 1
-            continue
-        nlist = []
         for n in G[p]:
             if ( n in bfs ): 
                 continue
             bfs[n] = part_id
             area[part_id] += shapes_areas[n]
-            nlist.append(n)
+            Q[part_id].append(n)
             logger.debug("part {} n {} arean {}".format(part_id,n,shapes_areas[n]))
-            #if (area[part_id] > total_area/2 and qlen[apart_id] > 0):
-            if (area[part_id] > area[apart_id] and qlen[apart_id] > 0):
-                Q.append(p)
-                qlen[part_id] += 1
+            if (area[part_id] > area[apart_id] and len(Q[apart_id]) > 0):
+                Q[part_id].appendleft(p) #put the same place we've taken it from
                 break
-        for n in nlist: # children should be queued after parent
-            Q.append(n)
-            qlen[part_id] += 1
-    logger.debug("total area: {}".format(total_area))
     logger.debug("areas: {}".format(area))
     return
 
