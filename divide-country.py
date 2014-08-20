@@ -219,35 +219,48 @@ def getFarthestPoint(G,pointid):
         lastpoint = p
     return lastpoint
 
-def bfsMarkParts(G,bfs,startpoints,part_id):
+def bfsMarkParts(G,bfs,startpoints):
     """
     маркирует части графа
     """
-    p = startpoints[part_id]
     Q = deque()
-    Q.append(p)
-    area = shapes_areas[p]
+    qlen = [1,1]
+    area = [0,0]
     total_area = 0.0
     for s in G:
         total_area += shapes_areas[s]
-    logger.debug("total area: {}".format(total_area))
-    next_part_marked = False
+    for p in range(0,2):
+        Q.append(startpoints[p])
+        area[p] = shapes_areas[startpoints[p]]
     while( len(Q) > 0 ):
         p = Q.popleft()
+        part_id = bfs[p]
+        apart_id = abs(part_id - 1)
+        logger.debug("part {} p {} areapart {}".format(part_id,p,area[part_id]))
+        qlen[part_id] -= 1
+        #if (area[part_id] > total_area/2 and qlen[apart_id] > 0):
+        if (area[part_id] > area[apart_id] and qlen[apart_id] > 0):
+            Q.append(p)
+            qlen[part_id] += 1
+            continue
+        nlist = []
         for n in G[p]:
             if ( n in bfs ): 
                 continue
-            if ( ( part_id < len(startpoints) - 1 ) and 
-                    ( not next_part_marked ) and
-                    ( area >= total_area/2 ) ):
-                bfsMarkParts(G,bfs,startpoints,part_id+1)
-                next_part_marked = True
-            if ( n in bfs ): 
-                continue
             bfs[n] = part_id
-            area += shapes_areas[n]
-            logger.debug("p {} n {} area {}".format(part_id,n,area))
+            area[part_id] += shapes_areas[n]
+            nlist.append(n)
+            logger.debug("part {} n {} arean {}".format(part_id,n,shapes_areas[n]))
+            #if (area[part_id] > total_area/2 and qlen[apart_id] > 0):
+            if (area[part_id] > area[apart_id] and qlen[apart_id] > 0):
+                Q.append(p)
+                qlen[part_id] += 1
+                break
+        for n in nlist: # children should be queued after parent
             Q.append(n)
+            qlen[part_id] += 1
+    logger.debug("total area: {}".format(total_area))
+    logger.debug("areas: {}".format(area))
     return
 
 def divideGraph(G,p1,p2):
@@ -257,7 +270,7 @@ def divideGraph(G,p1,p2):
     возвращает массив списков из идентификаторов полученных частей
     """
     bfs = {p1:0, p2:1}
-    bfsMarkParts(G,bfs,[p1,p2],0)
+    bfsMarkParts(G,bfs,[p1,p2])
     result = [[],[]]
     for s in bfs:
         result[bfs[s]].append(s)
@@ -322,6 +335,9 @@ for loopnum in range(0,args.num):
     logger.debug("partition {}".format(loopnum))
     newparts = []
     for part in parts:
+        if ( len(part) < 2 ):
+            newparts.append(part)
+            continue
         logger.info("create graph")
         logger.debug("number of shapes: {}".format(len(part)))
         G = createGraph(part)
