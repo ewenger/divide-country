@@ -97,6 +97,27 @@ def readOsmFile(filename):
     f=open(filename,"r");
     etree.parse(f,parser);
     f.close();
+    brokenways=[]
+    for w in result["ways"]:
+        for n in result["ways"][w]:
+            if n not in result["nodes"]:
+                brokenways.append(w)
+                logger.debug("broken way {0}".format(w))
+                break
+    for w in brokenways:
+        del result["ways"][w]
+    brokenrels=[]
+    for t in ["outer"]:
+        for r in result["rels"][t]:
+            for w in result["rels"][t][r]:
+                if w not in result["ways"]:
+                    brokenrels.append(r)
+                    logger.debug("broken relation {0}".format(r))
+                    break
+    for r in brokenrels:
+        del result["rels"]["outer"][r]
+        del result["rels"]["inner"][r]
+
     return result
 
 def mergeWays(ways_to_merge):
